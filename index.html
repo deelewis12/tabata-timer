@@ -36,73 +36,71 @@
   <div id="countdown" style="display:none;"></div>
 
   <script>
-    // 1. Grab elements
-    const btn = document.getElementById('start-button');
-    const display = document.getElementById('countdown');
+  const btn     = document.getElementById('start-button');
+  const display = document.getElementById('countdown');
 
-    // 2. Define your intervals (in seconds)
-    const intervals = [30, 30];
-    let current = 0;
-    let timeLeft = 0;
-    let timerId = null;
+  // 1) Declare a shared AudioContext
+  let audioCtx;
 
-    // 3. Function to play a soft “chime” via Web Audio API
-    function playChime() {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(0, ctx.currentTime);
-        gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5);
-        gain.connect(ctx.destination);
+  const intervals = [30, 30];
+  let current = 0, timeLeft = 0, timerId;
 
-  // two oscillators for a simple major third bell (C5 + E5)
-  [523.25, 659.25].forEach((freq) => {
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    osc.connect(gain);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 1.5);
-  });
-}
+  // 2) New playChime() uses the unlocked context
+  function playChime() {
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
+    gain.connect(audioCtx.destination);
 
+    [523.25, 659.25].forEach(freq => {
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 1.5);
+    });
+  }
 
-    // 4. Update the on‑screen timer each second
-    function tick() {
-      timeLeft--;
-      display.textContent = timeLeft;
-      if (timeLeft <= 0) {
-        playChime();
-        current++;
-        if (current < intervals.length) {
-          timeLeft = intervals[current];
-        } else {
-          reset();
-        }
+  function tick() {
+    timeLeft--;
+    display.textContent = timeLeft;
+    if (timeLeft <= 0) {
+      playChime();
+      current++;
+      if (current < intervals.length) {
+        timeLeft = intervals[current];
+      } else {
+        reset();
       }
     }
+  }
 
-    // 5. Start the sequence
-    function start() {
-      btn.style.display = 'none';
-      display.style.display = 'block';
-      current = 0;
-      timeLeft = intervals[0];
-      display.textContent = timeLeft;
-      // run tick() every 1 000 ms
-      timerId = setInterval(tick, 1000);
+  function start() {
+    // 3) Create & resume AudioContext inside the gesture
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
     }
 
-    // 6. Reset back to Start button
-    function reset() {
-      clearInterval(timerId);
-      display.style.display = 'none';
-      btn.style.display = 'inline-block';
-    }
+    btn.style.display     = 'none';
+    display.style.display = 'block';
+    current  = 0;
+    timeLeft = intervals[0];
+    display.textContent = timeLeft;
+    timerId = setInterval(tick, 1000);
+  }
 
-    // 7. Wire up the button
-    btn.addEventListener('click', start);
-  </script>
+  function reset() {
+    clearInterval(timerId);
+    display.style.display = 'none';
+    btn.style.display     = 'inline-block';
+  }
+
+  btn.addEventListener('click', start);
+</script>
+
 
   <script>
     if ('serviceWorker' in navigator) {

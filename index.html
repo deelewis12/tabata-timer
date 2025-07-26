@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Tabata Timer</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    /* Center everything vertically & horizontally */
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      font-family: sans-serif;
+      background: #f5f5f5;
+    }
+    /* Start button styling */
+    #start-button {
+      padding: 1em 2em;
+      font-size: 1.5em;
+      cursor: pointer;
+    }
+    /* Countdown text */
+    #countdown {
+      margin-top: 1em;
+      font-size: 3em;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <button id="start-button">Start</button>
+  <div id="countdown" style="display:none;"></div>
+
+  <script>
+    // 1. Grab elements
+    const btn = document.getElementById('start-button');
+    const display = document.getElementById('countdown');
+
+    // 2. Define your intervals (in seconds)
+    const intervals = [30, 30];
+    let current = 0;
+    let timeLeft = 0;
+    let timerId = null;
+
+    // 3. Function to play a soft “chime” via Web Audio API
+    function playChime() {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5);
+        gain.connect(ctx.destination);
+
+  // two oscillators for a simple major third bell (C5 + E5)
+  [523.25, 659.25].forEach((freq) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 1.5);
+  });
+}
+
+
+    // 4. Update the on‑screen timer each second
+    function tick() {
+      timeLeft--;
+      display.textContent = timeLeft;
+      if (timeLeft <= 0) {
+        playChime();
+        current++;
+        if (current < intervals.length) {
+          timeLeft = intervals[current];
+        } else {
+          reset();
+        }
+      }
+    }
+
+    // 5. Start the sequence
+    function start() {
+      btn.style.display = 'none';
+      display.style.display = 'block';
+      current = 0;
+      timeLeft = intervals[0];
+      display.textContent = timeLeft;
+      // run tick() every 1 000 ms
+      timerId = setInterval(tick, 1000);
+    }
+
+    // 6. Reset back to Start button
+    function reset() {
+      clearInterval(timerId);
+      display.style.display = 'none';
+      btn.style.display = 'inline-block';
+    }
+
+    // 7. Wire up the button
+    btn.addEventListener('click', start);
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () =>
+        navigator.serviceWorker.register('/service-worker.js')
+        );
+    }
+</script>
+
+
+</body>
+</html>

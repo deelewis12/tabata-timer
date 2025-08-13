@@ -1,40 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Tabata Timer</title>
+
+  <!-- PWA manifest (no icons required) -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#4CAF50" />
+
   <style>
+    :root { --bg:#f0f8ff; --flash:#ffe599; --btn:#4CAF50; --btn-disabled:#888; }
+    html, body { height:100%; }
     body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      background-color: #f0f8ff;
-      margin: 0;
-      padding: 0;
-      transition: background-color 0.3s ease;
+      margin:0;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      background:var(--bg);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      transition: background-color .3s ease;
+      -webkit-tap-highlight-color: transparent;
+      user-select:none;
     }
-    h1 {
-      margin-top: 20px;
-    }
-    #timer {
-      font-size: 4em;
-      margin-top: 30px;
-    }
+    h1 { margin: 0 0 8px; font-size: 20px; font-weight:600; opacity:.85; }
+    #timer { font-size: 64px; font-weight:700; letter-spacing: .5px; }
     button {
-      font-size: 1.5em;
-      padding: 10px 20px;
-      margin-top: 40px;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 8px;
+      margin-top: 24px;
+      font-size: 18px;
+      padding: 12px 22px;
+      color: #fff;
+      background: var(--btn);
+      border: 0; border-radius: 10px;
     }
-    button:disabled {
-      background-color: #888;
-    }
-    .flash {
-      background-color: #ffe599 !important;
-    }
+    button:disabled { background: var(--btn-disabled); }
+    .flash { background: var(--flash) !important; }
   </style>
 </head>
 <body>
@@ -43,106 +44,109 @@
   <button id="startBtn">Start</button>
 
   <script>
+    // ======= Audio: robust for iOS (Low Power Mode & suspended contexts) =======
     let audioCtx;
-    let chimeBuffer;
-    let countdown;
-    let keepAliveInterval;
-
-    const timerDisplay = document.getElementById('timer');
-    const startBtn = document.getElementById('startBtn');
-
+    let chimeBuffer;      // pre-generated chime
+    let keepAliveId;      // silent blips to reduce suspension
     function initAudio() {
       if (!audioCtx || audioCtx.state === 'closed') {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        createChimeBuffer();
+        buildChimeBuffer();
       }
     }
-
     function unlockAudio() {
       initAudio();
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
     }
+    function buildChimeBuffer() {
+      // build a soft, pleasant “bell” chord once; play instantly later
+      const sr = audioCtx.sampleRate;
+      const dur = 1.2;
+      const length = Math.floor(sr * dur);
+      const buf = audioCtx.createBuffer(1, length, sr);
+      const data = buf.getChannelData(0);
 
-    function createChimeBuffer() {
-      const duration = 0.5;
-      const sampleRate = audioCtx.sampleRate;
-      const buffer = audioCtx.createBuffer(1, sampleRate * duration, sampleRate);
-      const data = buffer.getChannelData(0);
-      const freq = 660; // soothing chime frequency
-
-      for (let i = 0; i < data.length; i++) {
-        const fade = 1 - i / data.length;
-        data[i] = 0.2 * Math.sin(2 * Math.PI * freq * (i / sampleRate)) * fade;
+      const tones = [523.25, 659.25]; // C5 + E5
+      for (let i = 0; i < length; i++) {
+        const t = i / sr;
+        const env = Math.min(1, t / 0.02) * Math.exp(-2.6 * t); // quick attack, gentle decay
+        let s = 0;
+        for (const f of tones) s += Math.sin(2 * Math.PI * f * t);
+        data[i] = 0.11 * s * env; // overall level kept modest
       }
-      chimeBuffer = buffer;
+      chimeBuffer = buf;
     }
-
     function playChime() {
       unlockAudio();
-      const source = audioCtx.createBufferSource();
-      source.buffer = chimeBuffer;
-      source.connect(audioCtx.destination);
-      source.start();
+      if (!chimeBuffer) buildChimeBuffer();
+      const src = audioCtx.createBufferSource();
+      src.buffer = chimeBuffer;
+      src.connect(audioCtx.destination);
+      src.start();
       flashScreen();
     }
-
     function flashScreen() {
       document.body.classList.add('flash');
-      setTimeout(() => {
-        document.body.classList.remove('flash');
-      }, 300);
+      setTimeout(() => document.body.classList.remove('flash'), 300);
     }
-
-    function keepAliveTone() {
+    function keepAlivePing() {
       if (!audioCtx || audioCtx.state === 'closed') return;
-      unlockAudio();
+      unlockAudio(); // resume if iOS suspended it
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      gain.gain.value = 0; // silent
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.05);
+      gain.gain.value = 0; // silent tick to keep context “active”
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.05);
     }
+
+    // ======= Timer logic =======
+    const timerEl = document.getElementById('timer');
+    const startBtn = document.getElementById('startBtn');
+    let tickId;
 
     function startTimer() {
       unlockAudio();
-      clearInterval(countdown);
-      clearInterval(keepAliveInterval);
+      clearInterval(tickId);
+      clearInterval(keepAliveId);
 
       let timeLeft = 30;
-      let cycles = 2;
-
+      let rounds = 2;
       startBtn.disabled = true;
-      timerDisplay.textContent = timeLeft;
+      timerEl.textContent = timeLeft;
 
-      keepAliveInterval = setInterval(keepAliveTone, 20000);
+      keepAliveId = setInterval(keepAlivePing, 20000);
 
-      countdown = setInterval(() => {
+      tickId = setInterval(() => {
         timeLeft--;
-        timerDisplay.textContent = timeLeft;
-
+        timerEl.textContent = timeLeft;
         if (timeLeft <= 0) {
           playChime();
-          cycles--;
-          if (cycles > 0) {
+          rounds--;
+          if (rounds > 0) {
             timeLeft = 30;
+            timerEl.textContent = timeLeft;
           } else {
-            clearInterval(countdown);
-            clearInterval(keepAliveInterval);
+            clearInterval(tickId);
+            clearInterval(keepAliveId);
             startBtn.disabled = false;
-            timerDisplay.textContent = '30';
+            timerEl.textContent = '30';
           }
         }
       }, 1000);
     }
 
     startBtn.addEventListener('click', () => {
-      unlockAudio();
+      unlockAudio();       // user gesture → unlock
       startTimer();
     });
+
+    // ======= PWA: register service worker =======
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js')
+          .catch(err => console.warn('SW registration failed', err));
+      });
+    }
   </script>
 </body>
 </html>

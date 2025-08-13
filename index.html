@@ -1,115 +1,148 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tabata Timer</title>
-  <link rel="manifest" href="manifest.json">
   <style>
-    /* Center everything vertically & horizontally */
     body {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background-color: #f0f8ff;
       margin: 0;
-      font-family: sans-serif;
-      background: #f5f5f5;
+      padding: 0;
+      transition: background-color 0.3s ease;
     }
-    /* Start button styling */
-    #start-button {
-      padding: 1em 2em;
+    h1 {
+      margin-top: 20px;
+    }
+    #timer {
+      font-size: 4em;
+      margin-top: 30px;
+    }
+    button {
       font-size: 1.5em;
-      cursor: pointer;
+      padding: 10px 20px;
+      margin-top: 40px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 8px;
     }
-    /* Countdown text */
-    #countdown {
-      margin-top: 1em;
-      font-size: 3em;
-      font-weight: bold;
+    button:disabled {
+      background-color: #888;
+    }
+    .flash {
+      background-color: #ffe599 !important;
     }
   </style>
 </head>
 <body>
-  <button id="start-button">Start</button>
-  <div id="countdown" style="display:none;"></div>
+  <h1>Tabata Timer</h1>
+  <div id="timer">30</div>
+  <button id="startBtn">Start</button>
 
   <script>
-  const btn     = document.getElementById('start-button');
-  const display = document.getElementById('countdown');
+    let audioCtx;
+    let chimeBuffer;
+    let countdown;
+    let keepAliveInterval;
 
-  // 1) Declare a shared AudioContext
-  let audioCtx;
+    const timerDisplay = document.getElementById('timer');
+    const startBtn = document.getElementById('startBtn');
 
-  const intervals = [30, 30];
-  let current = 0, timeLeft = 0, timerId;
-
-  // 2) New playChime() uses the unlocked context
-  function playChime() {
-    const gain = audioCtx.createGain();
-    gain.gain.setValueAtTime(0, audioCtx.currentTime);
-    gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
-    gain.connect(audioCtx.destination);
-
-    [523.25, 659.25].forEach(freq => {
-      const osc = audioCtx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      osc.connect(gain);
-      osc.start(audioCtx.currentTime);
-      osc.stop(audioCtx.currentTime + 1.5);
-    });
-  }
-
-  function tick() {
-    timeLeft--;
-    display.textContent = timeLeft;
-    if (timeLeft <= 0) {
-      playChime();
-      current++;
-      if (current < intervals.length) {
-        timeLeft = intervals[current];
-      } else {
-        reset();
+    function initAudio() {
+      if (!audioCtx || audioCtx.state === 'closed') {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        createChimeBuffer();
       }
     }
-  }
 
-  function start() {
-    // 3) Create & resume AudioContext inside the gesture
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
+    function unlockAudio() {
+      initAudio();
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
     }
 
-    btn.style.display     = 'none';
-    display.style.display = 'block';
-    current  = 0;
-    timeLeft = intervals[0];
-    display.textContent = timeLeft;
-    timerId = setInterval(tick, 1000);
-  }
+    function createChimeBuffer() {
+      const duration = 0.5;
+      const sampleRate = audioCtx.sampleRate;
+      const buffer = audioCtx.createBuffer(1, sampleRate * duration, sampleRate);
+      const data = buffer.getChannelData(0);
+      const freq = 660; // soothing chime frequency
 
-  function reset() {
-    clearInterval(timerId);
-    display.style.display = 'none';
-    btn.style.display     = 'inline-block';
-  }
-
-  btn.addEventListener('click', start);
-</script>
-
-
-  <script>
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () =>
-        navigator.serviceWorker.register('/service-worker.js')
-        );
+      for (let i = 0; i < data.length; i++) {
+        const fade = 1 - i / data.length;
+        data[i] = 0.2 * Math.sin(2 * Math.PI * freq * (i / sampleRate)) * fade;
+      }
+      chimeBuffer = buffer;
     }
-</script>
 
+    function playChime() {
+      unlockAudio();
+      const source = audioCtx.createBufferSource();
+      source.buffer = chimeBuffer;
+      source.connect(audioCtx.destination);
+      source.start();
+      flashScreen();
+    }
 
+    function flashScreen() {
+      document.body.classList.add('flash');
+      setTimeout(() => {
+        document.body.classList.remove('flash');
+      }, 300);
+    }
+
+    function keepAliveTone() {
+      if (!audioCtx || audioCtx.state === 'closed') return;
+      unlockAudio();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      gain.gain.value = 0; // silent
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+
+    function startTimer() {
+      unlockAudio();
+      clearInterval(countdown);
+      clearInterval(keepAliveInterval);
+
+      let timeLeft = 30;
+      let cycles = 2;
+
+      startBtn.disabled = true;
+      timerDisplay.textContent = timeLeft;
+
+      keepAliveInterval = setInterval(keepAliveTone, 20000);
+
+      countdown = setInterval(() => {
+        timeLeft--;
+        timerDisplay.textContent = timeLeft;
+
+        if (timeLeft <= 0) {
+          playChime();
+          cycles--;
+          if (cycles > 0) {
+            timeLeft = 30;
+          } else {
+            clearInterval(countdown);
+            clearInterval(keepAliveInterval);
+            startBtn.disabled = false;
+            timerDisplay.textContent = '30';
+          }
+        }
+      }, 1000);
+    }
+
+    startBtn.addEventListener('click', () => {
+      unlockAudio();
+      startTimer();
+    });
+  </script>
 </body>
 </html>
